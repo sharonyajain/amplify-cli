@@ -2,7 +2,7 @@
 
 /* These tests test the AmplifyS3ResourceStackTransform and run the cdk builder tool which is used within this file */
 import * as uuid from 'uuid';
-import { $TSContext, CLISubCommandType, stateManager, buildOverrideDir, pathManager } from '@aws-amplify/amplify-cli-core';
+import { $TSContext, CLISubCommandType, stateManager, buildOverrideDir, pathManager, AmplifyError } from '@aws-amplify/amplify-cli-core';
 import _ from 'lodash';
 import { AmplifyS3ResourceStackTransform } from '../../../../provider-utils/awscloudformation/cdk-stack-builder/s3-stack-transform';
 import {
@@ -25,6 +25,7 @@ const mockContext = {
       },
     }),
     getUserPoolGroupList: () => [],
+    getEnvInfo: () => ({ envName: 'mockEnvName' }),
     // eslint-disable-next-line
     getResourceStatus: () => {
       return { allResources: S3MockDataBuilder.getMockGetAllResourcesNoExistingLambdas() };
@@ -91,13 +92,13 @@ describe('Test S3 transform generates correct CFN template', () => {
       unauthRoleName: { Ref: 'UnauthRoleName' },
       authRoleName: { Ref: 'AuthRoleName' },
       triggerFunction: mockTriggerFunction,
-      s3PrivatePolicy: `Private_policy_${shortId}`,
-      s3ProtectedPolicy: `Protected_policy_${shortId}`,
-      s3PublicPolicy: `Public_policy_${shortId}`,
-      s3ReadPolicy: `read_policy_${shortId}`,
-      s3UploadsPolicy: `Uploads_policy_${shortId}`,
-      authPolicyName: `s3_amplify_${shortId}`,
-      unauthPolicyName: `s3_amplify_${shortId}`,
+      s3PrivatePolicy: `Private_policy_${shortId}_mockEnvName`,
+      s3ProtectedPolicy: `Protected_policy_${shortId}_mockEnvName`,
+      s3PublicPolicy: `Public_policy_${shortId}_mockEnvName`,
+      s3ReadPolicy: `read_policy_${shortId}_mockEnvName`,
+      s3UploadsPolicy: `Uploads_policy_${shortId}_mockEnvName`,
+      authPolicyName: `s3_amplify_${shortId}_mockEnvName`,
+      unauthPolicyName: `s3_amplify_${shortId}_mockEnvName`,
       AuthenticatedAllowList: 'ALLOW',
       GuestAllowList: 'ALLOW',
       s3PermissionsAuthenticatedPrivate: 's3:PutObject,s3:GetObject,s3:DeleteObject',
@@ -113,6 +114,44 @@ describe('Test S3 transform generates correct CFN template', () => {
     await s3Transform.transform(CLISubCommandType.ADD);
     expect(s3Transform.getCFN()).toMatchSnapshot();
     expect(_.isEqual(s3Transform.getCFNInputParams(), cliInputParams)).toEqual(true);
+  });
+
+  it('throws when the current environment name cannot be determined', async () => {
+    const resourceName = 'mockResource';
+    const bucketName = 'mockBucketName';
+    const [shortId] = uuid.v4().split('-');
+    const cliInputs: S3UserInputs = {
+      resourceName,
+      bucketName,
+      policyUUID: shortId,
+      storageAccess: S3AccessType.AUTH_AND_GUEST,
+      guestAccess: [S3PermissionType.READ],
+      authAccess: [S3PermissionType.CREATE_AND_UPDATE, S3PermissionType.READ, S3PermissionType.DELETE],
+      triggerFunction: 'NONE',
+      adminTriggerFunction: undefined,
+      additionalTriggerFunctions: undefined,
+      groupAccess: undefined,
+    };
+
+    jest.spyOn(S3InputState.prototype, 'getCliInputPayload').mockImplementation(() => cliInputs);
+
+    // Context whose env info carries no envName (uninitialized env / headless path).
+    const contextWithoutEnvName = {
+      ...mockContext,
+      amplify: {
+        ...mockContext.amplify,
+        getEnvInfo: () => ({}),
+      },
+    } as unknown as $TSContext;
+
+    const s3Transform = new AmplifyS3ResourceStackTransform(resourceName, contextWithoutEnvName);
+    await expect(s3Transform.transform(CLISubCommandType.ADD)).rejects.toBeDefined();
+    expect(AmplifyError).toHaveBeenCalledWith(
+      'EnvironmentNotInitializedError',
+      expect.objectContaining({
+        message: expect.stringContaining('environment name'),
+      }),
+    );
   });
 });
 

@@ -112,13 +112,27 @@ export class AmplifyS3ResourceStackTransform {
     if (userInput.adminTriggerFunction?.triggerFunction && userInput.adminTriggerFunction.triggerFunction !== 'NONE') {
       this.cfnInputParams.adminTriggerFunction = userInput.adminTriggerFunction.triggerFunction;
     }
-    this.cfnInputParams.s3PrivatePolicy = `Private_policy_${userInput.policyUUID}`;
-    this.cfnInputParams.s3ProtectedPolicy = `Protected_policy_${userInput.policyUUID}`;
-    this.cfnInputParams.s3PublicPolicy = `Public_policy_${userInput.policyUUID}`;
-    this.cfnInputParams.s3ReadPolicy = `read_policy_${userInput.policyUUID}`;
-    this.cfnInputParams.s3UploadsPolicy = `Uploads_policy_${userInput.policyUUID}`;
-    this.cfnInputParams.authPolicyName = `s3_amplify_${userInput.policyUUID}`;
-    this.cfnInputParams.unauthPolicyName = `s3_amplify_${userInput.policyUUID}`;
+    // Policy names must be unique per environment. When multiple environments share the
+    // same IAM role (e.g. an imported Identity Pool with shared auth/unauth roles), reusing
+    // the same policyUUID across environments produces identically named inline policies on
+    // the same role. Since CloudFormation began enforcing single-stack ownership of IAM
+    // inline policies, this collides with "Policy resource was already managed by another
+    // stack". Appending the environment name keeps the generated names distinct per env.
+    const envName = this.context.amplify.getEnvInfo()?.envName;
+    if (typeof envName !== 'string' || envName.length === 0) {
+      throw new AmplifyError('EnvironmentNotInitializedError', {
+        message: 'Cannot determine the current Amplify environment name while generating S3 IAM policy names.',
+        resolution: `Run 'amplify init' or 'amplify env checkout <env>' in the root of your app directory to select an environment, then try again.`,
+      });
+    }
+    const policyNameSuffix = `${userInput.policyUUID}_${envName}`;
+    this.cfnInputParams.s3PrivatePolicy = `Private_policy_${policyNameSuffix}`;
+    this.cfnInputParams.s3ProtectedPolicy = `Protected_policy_${policyNameSuffix}`;
+    this.cfnInputParams.s3PublicPolicy = `Public_policy_${policyNameSuffix}`;
+    this.cfnInputParams.s3ReadPolicy = `read_policy_${policyNameSuffix}`;
+    this.cfnInputParams.s3UploadsPolicy = `Uploads_policy_${policyNameSuffix}`;
+    this.cfnInputParams.authPolicyName = `s3_amplify_${policyNameSuffix}`;
+    this.cfnInputParams.unauthPolicyName = `s3_amplify_${policyNameSuffix}`;
     this.cfnInputParams.AuthenticatedAllowList = this._getAuthGuestListPermission(S3PermissionType.READ, userInput.authAccess);
     this.cfnInputParams.GuestAllowList = this._getAuthGuestListPermission(S3PermissionType.READ, userInput.guestAccess);
     this.cfnInputParams.s3PermissionsAuthenticatedPrivate = this._getPublicPrivatePermissions(
